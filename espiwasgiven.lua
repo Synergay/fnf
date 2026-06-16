@@ -1,3 +1,103 @@
+if not getfenv().LPH_NO_VIRTUALIZE then getfenv().LPH_NO_VIRTUALIZE = function(f) return f end; end
+
+local ESP = {
+    Settings = {
+        Enabled = true,
+        MaxDistance = 1500,
+        Container = workspace:FindFirstChild("Characters") or workspace,
+        Color = Color3.fromRGB(0, 255, 255),
+        OutlineColor = Color3.fromRGB(0, 0, 0),
+        Thickness = 1,
+        TextSize = 14,
+        Font = 2,
+
+        Boxes = false,
+        CornerBoxes = true,
+        BoxOutlines = true,
+        CornerSizeX = 0.25,
+        CornerSizeY = 0.25,
+
+        Skeletons = true,
+        SkeletonColor = Color3.fromRGB(255, 255, 255),
+
+        HeadDots = false,
+        HeadDotSize = 4,
+
+        Tracers = false,
+        TracerOrigin = "Bottom",
+
+        Names = true,
+        Distances = true,
+        HealthText = true,
+        HealthBar = true,
+        HealthBarColor = Color3.fromRGB(0, 255, 0),
+
+        Positions = {
+            Name = "Top",
+            Distance = "Bottom",
+            HealthText = "Right",
+            HealthBar = "Left"
+        },
+
+        Chams = false,
+        ChamsFillColor = Color3.fromRGB(0, 255, 255),
+        ChamsFillTransparency = 0.5,
+        ChamsOutlineColor = Color3.fromRGB(255, 255, 255),
+        ChamsOutlineTransparency = 0,
+
+        Optimizations = {
+            RefreshRate = 30,
+            DistanceCull = true,
+            MaxTargets = 0,
+            LowDetailDistance = 600
+        }
+    },
+    Tracked = {}
+}
+
+local cam = workspace.CurrentCamera;
+local rs = game:GetService("RunService");
+local plrs = game:GetService("Players");
+local lp = plrs.LocalPlayer;
+local cons = {};
+
+local v2 = Vector2.new;
+local flr = math.floor;
+local clamp = math.clamp;
+local abs = math.abs;
+local sqrt = math.sqrt;
+
+local hoff = Vector3.new(0, 0.5, 0);
+local fhoff = Vector3.new(0, 2.5, 0);
+local loff = Vector3.new(0, 3, 0);
+
+local skels = {
+    R15 = {
+        {"Head","UpperTorso"},{"UpperTorso","LowerTorso"},{"UpperTorso","RightUpperArm"},{"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
+        {"UpperTorso","LeftUpperArm"},{"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},{"LowerTorso","RightUpperLeg"},{"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"},
+        {"LowerTorso","LeftUpperLeg"},{"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"}
+    },
+    R6 = {
+        {"Head","Torso"},{"Torso","Right Arm"},{"Torso","Left Arm"},{"Torso","Right Leg"},{"Torso","Left Leg"}
+    }
+}
+
+local function mkln(t, c, z)
+    local l = Drawing.new("Line"); l.Thickness = t; l.Color = c; l.ZIndex = z; l.Visible = false; return l;
+end
+local function mktxt(s, f, c, cn, o)
+    local t = Drawing.new("Text"); t.Size = s; t.Font = f; t.Color = c; t.Center = cn; t.Outline = o; t.Visible = false; return t;
+end
+local function mkcir(f, t, c, z)
+    local cr = Drawing.new("Circle"); cr.Filled = f; cr.Thickness = t; cr.Color = c; cr.ZIndex = z; cr.Visible = false; return cr;
+end
+local function mksq(f, t, c, z)
+    local sq = Drawing.new("Square"); sq.Filled = f; sq.Thickness = t; sq.Color = c; sq.ZIndex = z; sq.Visible = false; return sq;
+end
+local function setln(ln, ol, from, to, t, c, oc, v, ov)
+    if ln then ln.From = from; ln.To = to; ln.Thickness = t; ln.Color = c; ln.Visible = v; end
+    if ol then ol.From = from; ol.To = to; ol.Thickness = t + 2; ol.Color = oc; ol.Visible = ov; end
+end
 
 local function mkdraw()
     local d = {
@@ -48,160 +148,3 @@ local function poslbl(dr, str, side, col)
     elseif side == "Right" then
         dr.Center = false; dr.Position = v2(x + w + 4 + lbl.hpr, y + stk.Right); stk.Right = stk.Right + b.Y + 2;
     end
-    dr.Visible = true;
-end
-
-function ESP:Add(model)
-    if model.Name == lp.Name or self.Tracked[model] then return; end
-    self.Tracked[model] = mkdraw();
-end
-
-function ESP:Remove(model)
-    if self.Tracked[model] then rmdraw(self.Tracked[model]); self.Tracked[model] = nil; end
-end
-
-function ESP:Clear()
-    for m in next, self.Tracked do self:Remove(m); end
-    if cons.add then cons.add:Disconnect(); end
-    if cons.rem then cons.rem:Disconnect(); end
-    if cons.rndr then cons.rndr:Disconnect(); end
-end
-
-function ESP:Update()
-    local s = self.Settings;
-    if not s.Enabled then
-        for _, d in next, self.Tracked do hide(d); end
-        return;
-    end
-
-    local o = s.Optimizations;
-    lbl.s = s;
-    local cpos = cam.CFrame.Position;
-    local vp = cam.ViewportSize;
-    local md = s.MaxDistance;
-    local mdsq = md * md;
-    local ldsq = o.LowDetailDistance > 0 and o.LowDetailDistance * o.LowDetailDistance or math.huge;
-    local mt = o.MaxTargets;
-    local drawn = 0;
-
-    for model, d in next, self.Tracked do
-        local root = d.root;
-        if not root or root.Parent ~= model then
-            root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart;
-            d.root = root;
-        end
-
-        if root and model.Parent then
-            local rp = root.Position;
-            local dx, dy, dz = cpos.X - rp.X, cpos.Y - rp.Y, cpos.Z - rp.Z;
-            local dsq = dx * dx + dy * dy + dz * dz;
-
-            if (o.DistanceCull and dsq > mdsq) or (mt > 0 and drawn >= mt) then
-                hide(d);
-            else
-                local pos, vis = cam:WorldToViewportPoint(rp);
-                local dist = sqrt(dsq);
-
-                if vis and dist <= md then
-                    drawn += 1;
-
-                    local hum = d.hum;
-                    if not hum or hum.Parent ~= model then
-                        hum = model:FindFirstChildOfClass("Humanoid");
-                        d.hum = hum;
-                    end
-
-                    local hd = model:FindFirstChild("Head");
-                    local hp = hd and cam:WorldToViewportPoint(hd.Position + hoff) or cam:WorldToViewportPoint(rp + fhoff);
-                    local lp2 = cam:WorldToViewportPoint(rp - loff);
-                    local h = abs(hp.Y - lp2.Y);
-                    local w = h / 1.5;
-                    local x = pos.X - w / 2;
-                    local y = hp.Y;
-
-                    if s.CornerBoxes then
-                        local lx, ly = w * s.CornerSizeX, h * s.CornerSizeY;
-                        local c, ol = d.Corners, d.CornerOutlines;
-                        setln(c[1], ol[1], v2(x, y), v2(x + lx, y), s.Thickness, s.Color, s.OutlineColor, true, s.BoxOutlines);
-                        setln(c[2], ol[2], v2(x, y), v2(x, y + ly), s.Thickness, s.Color, s.OutlineColor, true, s.BoxOutlines);
-                        setln(c[3], ol[3], v2(x + w, y), v2(x + w - lx, y), s.Thickness, s.Color, s.OutlineColor, true, s.BoxOutlines);
-                        setln(c[4], ol[4], v2(x + w, y), v2(x + w, y + ly), s.Thickness, s.Color, s.OutlineColor, true, s.BoxOutlines);
-                        setln(c[5], ol[5], v2(x, y + h), v2(x + lx, y + h), s.Thickness, s.Color, s.OutlineColor, true, s.BoxOutlines);
-                        setln(c[6], ol[6], v2(x, y + h), v2(x, y + h - ly), s.Thickness, s.Color, s.OutlineColor, true, s.BoxOutlines);
-                        setln(c[7], ol[7], v2(x + w, y + h), v2(x + w - lx, y + h), s.Thickness, s.Color, s.OutlineColor, true, s.BoxOutlines);
-                        setln(c[8], ol[8], v2(x + w, y + h), v2(x + w, y + h - ly), s.Thickness, s.Color, s.OutlineColor, true, s.BoxOutlines);
-                    else
-                        for i = 1, 8 do d.Corners[i].Visible = false; d.CornerOutlines[i].Visible = false; end
-                    end
-
-                    if s.Boxes then
-                        local b, ol = d.Box, d.BoxOutlines;
-                        setln(b[1], ol[1], v2(x, y), v2(x + w, y), s.Thickness, s.Color, s.OutlineColor, true, s.BoxOutlines);
-                        setln(b[2], ol[2], v2(x, y), v2(x, y + h), s.Thickness, s.Color, s.OutlineColor, true, s.BoxOutlines);
-                        setln(b[3], ol[3], v2(x + w, y), v2(x + w, y + h), s.Thickness, s.Color, s.OutlineColor, true, s.BoxOutlines);
-                        setln(b[4], ol[4], v2(x, y + h), v2(x + w, y + h), s.Thickness, s.Color, s.OutlineColor, true, s.BoxOutlines);
-                    else
-                        for i = 1, 4 do d.Box[i].Visible = false; d.BoxOutlines[i].Visible = false; end
-                    end
-
-                    stk.Top = 2; stk.Bottom = 2; stk.Left = 0; stk.Right = 0;
-                    lbl.x = x; lbl.w = w; lbl.h = h; lbl.y = y; lbl.hpl = 0; lbl.hpr = 0;
-
-                    if s.HealthBar and hum then
-                        local f = clamp(hum.Health / hum.MaxHealth, 0, 1);
-                        local bh = h * f;
-                        if s.Positions.HealthBar == "Left" then
-                            d.HealthBG.Position = v2(x - 5, y); d.HealthFill.Position = v2(x - 4, y + (h - bh)); lbl.hpl = 6;
-                        else
-                            d.HealthBG.Position = v2(x + w + 2, y); d.HealthFill.Position = v2(x + w + 3, y + (h - bh)); lbl.hpr = 6;
-                        end
-                        d.HealthBG.Size = v2(3, h); d.HealthBG.Color = s.OutlineColor; d.HealthBG.Visible = s.BoxOutlines;
-                        d.HealthFill.Size = v2(1, bh); d.HealthFill.Color = s.HealthBarColor; d.HealthFill.Visible = true;
-                    else
-                        d.HealthBG.Visible = false; d.HealthFill.Visible = false;
-                    end
-
-                    poslbl(d.Name, s.Names and model.Name or nil, s.Positions.Name, s.Color);
-                    poslbl(d.Distance, s.Distances and flr(dist) .. "m" or nil, s.Positions.Distance, s.Color);
-                    poslbl(d.HealthT, (s.HealthText and hum) and flr(hum.Health) .. " HP" or nil, s.Positions.HealthText, s.HealthBarColor);
-
-                    if s.Tracers then
-                        local org = s.TracerOrigin;
-                        local sy = org == "Bottom" and vp.Y or (org == "Top" and 0 or rs:GetMouseLocation().Y);
-                        local sx = org == "Mouse" and rs:GetMouseLocation().X or vp.X / 2;
-                        setln(d.Tracer, d.TracerOutline, v2(sx, sy), v2(x + w / 2, y + h), s.Thickness, s.Color, s.OutlineColor, true, s.BoxOutlines);
-                    else
-                        d.Tracer.Visible = false; d.TracerOutline.Visible = false;
-                    end
-                else
-                    hide(d);
-                end
-            end
-        else
-            hide(d);
-            if not model.Parent then self:Remove(model); end
-        end
-    end
-end
-
-function ESP:Listen(container)
-    if not container then return; end
-    self.Settings.Container = container;
-    for _, m in next, container:GetChildren() do if m:IsA("Model") then self:Add(m); end end
-    cons.add = container.ChildAdded:Connect(LPH_NO_VIRTUALIZE(function(c) if c:IsA("Model") then self:Add(c); end end));
-    cons.rem = container.ChildRemoved:Connect(LPH_NO_VIRTUALIZE(function(c) self:Remove(c); end));
-
-    local acc = 0;
-    cons.rndr = rs.RenderStepped:Connect(LPH_NO_VIRTUALIZE(function(dt)
-        local r = self.Settings.Optimizations.RefreshRate;
-        if r <= 0 or r >= 60 then
-            self:Update();
-        else
-            acc += dt;
-            local iv = 1 / r;
-            if acc >= iv then acc = acc % iv; self:Update(); end
-        end
-    end));
-end
-
-return ESP;
